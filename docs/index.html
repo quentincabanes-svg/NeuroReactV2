@@ -1,692 +1,521 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>NeuroReactV2 – LFDS (No‑deps)</title>
+  <style>
+    :root{
+      --bg:#f5f5f6; --panel:#fff; --text:#121212; --muted:#6b7280; --border:#e5e7eb;
+      --brand:#fb8c00; --brand-600:#f57c00; --brand-50:#fff3e0;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Apple Color Emoji","Segoe UI Emoji"}
+    .app{min-height:100dvh;display:flex;flex-direction:column}
+    .container{max-width:1200px;margin:0 auto;padding:0 16px}
 
-/**
- * LFDS Neuro Stimulus App – v2 (from scratch) · Mise à jour
- *
- * Nouveautés demandées:
- * 1) Option "Plein écran au démarrage" : si cochée, la *zone stimuli + bandeau de progression* passe en plein écran au démarrage de la session, avec bouton pour sortir. Compatible rotation.
- * 2) Anti-dépassement mobile/tablette : les stimuli (ex. Stroop) sont *auto-redimensionnés* pour rester entièrement visibles, même avec tailles élevées et position aléatoire.
- *
- * Reste du scope identique: modes, sélections, paramètres, bip, progression, compte à rebours, récup, raccourcis.
- */
+    header{position:sticky;top:0;z-index:10;background:rgba(255,255,255,.85);backdrop-filter:blur(6px);border-bottom:1px solid var(--border)}
+    header .bar{display:flex;align-items:center;justify-content:space-between;padding:10px 0}
+    .brand{display:flex;gap:12px;align-items:center}
+    .logo{width:40px;height:40px;border-radius:10px;border:1px solid var(--border);display:grid;place-items:center;background:#fff;overflow:hidden}
+    .logo span{font-size:11px;font-weight:800;color:#6b7280}
+    .button{appearance:none;border:0;border-radius:10px;padding:10px 12px;font-weight:700;font-size:12px;background:var(--brand);color:#fff;cursor:pointer;box-shadow:0 1px 1px rgba(0,0,0,.05)}
+    .button:hover{background:var(--brand-600)}
 
-// ==================== Constantes ====================
-const DEFAULT_COLORS = [
-  { name: "ROUGE", hex: "#E53935" },
-  { name: "VERT", hex: "#43A047" },
-  { name: "BLEU", hex: "#1E88E5" },
-  { name: "JAUNE", hex: "#FDD835" },
-  { name: "ORANGE", hex: "#FB8C00" },
-  { name: "VIOLET", hex: "#8E24AA" },
-  { name: "ROSE", hex: "#E91E63" },
-  { name: "NOIR", hex: "#111111" },
-  { name: "BLANC", hex: "#FFFFFF", outline: true },
-  { name: "GRIS", hex: "#9E9E9E" },
-  { name: "MARRON", hex: "#6D4C41" },
-];
+    main.layout{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:16px 0}
+    @media (max-width:980px){main.layout{grid-template-columns:1fr}}
 
-const DEFAULT_NUMBERS = Array.from({ length: 10 }, (_, i) => i);
+    .panel{background:var(--panel);border:1px solid var(--border);border-radius:18px;padding:16px;box-shadow:0 1px 2px rgba(0,0,0,.03)}
+    .panel h2{margin:0 0 8px;font-size:14px;font-weight:700}
+    .section{margin-bottom:16px}
+    .section h3{margin:0 0 8px;font-size:12px;font-weight:700;color:#374151;letter-spacing:.02em}
+    .section .box{border:1px solid var(--border);border-radius:14px;background:#fff;padding:12px;box-shadow:0 1px 2px rgba(0,0,0,.03)}
 
-const ALL_DIRECTIONS = [
-  { key: "haut", label: "↑" },
-  { key: "bas", label: "↓" },
-  { key: "gauche", label: "←" },
-  { key: "droite", label: "→" },
-  { key: "haut_droite", label: "↗" },
-  { key: "bas_droite", label: "↘" },
-  { key: "bas_gauche", label: "↙" },
-  { key: "haut_gauche", label: "↖" },
-];
+    .chips{display:flex;gap:8px;flex-wrap:wrap}
+    .chip{border:1px solid var(--border);background:#fff;padding:6px 10px;font:600 13px/1 system-ui,sans-serif;border-radius:999px;cursor:pointer;box-shadow:0 1px 1px rgba(0,0,0,.04)}
+    .chip.active{border-color:var(--brand);background:#fff7ed;color:#9a3412}
 
-const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
-const randFrom = (arr) => arr[Math.floor(Math.random() * arr.length)];
+    .swatches{display:flex;flex-wrap:wrap;gap:8px}
+    .swatch{width:40px;height:40px;border-radius:8px;border:1px solid var(--border);display:grid;place-items:center;font:700 10px/1 system-ui;color:#fff;cursor:pointer}
+    .swatch.active{outline:2px solid var(--brand);outline-offset:2px}
 
-// ==================== Bip simple ====================
-function useBeep() {
-  const ctxRef = useRef(null);
-  const ensure = () => {
-    if (!ctxRef.current) ctxRef.current = new (window.AudioContext || window.webkitAudioContext)();
-    return ctxRef.current;
-  };
-  return {
-    async beep(durationMs = 150, frequency = 880, volume = 0.22) {
-      try {
-        const ctx = ensure();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = "sine";
-        osc.frequency.value = frequency;
-        gain.gain.value = volume;
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start();
-        await new Promise((r) => setTimeout(r, durationMs));
-        osc.stop();
-      } catch {}
-    },
-  };
-}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 
-// ==================== UI Helpers ====================
-const Panel = ({ children }) => (
-  <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">{children}</div>
-);
-const Section = ({ title, children }) => (
-  <div className="mb-6">
-    <h3 className="text-sm font-semibold tracking-wider text-neutral-700">{title}</h3>
-    <div className="mt-2 rounded-xl border border-neutral-200 bg-white p-3 shadow-sm">{children}</div>
-  </div>
-);
-const Chip = ({ active, onClick, children }) => (
-  <button
-    onClick={onClick}
-    className={`select-none rounded-full border px-3 py-1 text-sm font-medium shadow-sm transition ${
-      active ? "border-orange-500 bg-orange-100 text-orange-700" : "border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50"
-    }`}
-  >
-    {children}
-  </button>
-);
-const ColorSwatch = ({ color, active, onToggle }) => (
-  <button
-    onClick={onToggle}
-    title={color.name}
-    className={`relative grid h-10 w-10 place-items-center rounded-md border text-[10px] font-semibold ${
-      active ? "ring-2 ring-orange-500 ring-offset-2" : ""
-    }`}
-    style={{ background: color.hex, color: color.outline ? "#111" : "#fff", borderColor: "#e5e7eb" }}
-  >
-    {color.outline ? (
-      <span className="text-[9px] font-bold text-neutral-700">{color.name}</span>
-    ) : (
-      <span className="opacity-70">{color.name.substring(0, 2)}</span>
-    )}
-  </button>
-);
-const NumberInput = ({ label, value, onChange, min, max, step, unit }) => {
-  const [local, setLocal] = useState(String(value));
-  useEffect(() => setLocal(String(value)), [value]);
-  const commit = () => {
-    const n = Number(local);
-    if (!Number.isFinite(n)) { setLocal(String(value)); return; }
-    const c = clamp(n, min ?? n, max ?? n);
-    setLocal(String(c));
-    onChange(c);
-  };
-  return (
-    <div>
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="text-xs font-medium text-neutral-600">{label}</span>
-        <div className="rounded-md bg-neutral-50 px-2 py-1 text-xs font-semibold text-neutral-700">{local || value}{unit}</div>
+    label.lbl{display:block;font:600 12px/1 system-ui;color:#374151;margin-bottom:6px}
+    input[type="number"],input[type="range"]{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:10px;font:600 13px/1 system-ui;background:#fff;outline:none}
+    input[type="number"]:focus,input[type="range"]:focus{box-shadow:0 0 0 2px #fed7aa;border-color:#fdba74}
+
+    .checkbox{display:flex;align-items:center;gap:8px;font:600 13px/1 system-ui}
+
+    .actions{display:flex;gap:8px}
+    .btn-outline{background:#fff;color:#c2410c;border:1px solid #fed7aa}
+
+    /* Stage shell (cible du plein écran) */
+    .stage-shell{position:relative;border-radius:16px;border:1px solid var(--border);background:#fff;padding:12px;box-shadow:0 1px 2px rgba(0,0,0,.03)}
+    .fs-exit{position:absolute;right:12px;top:12px;z-index:30;background:rgba(17,17,17,.75);color:#fff;border:0;border-radius:8px;padding:6px 10px;font:700 12px/1 system-ui}
+
+    .progress{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+    .progress .card{background:#eef2f7;border-radius:12px;padding:12px}
+    .progress .row{display:flex;align-items:center;justify-content:space-between;font:700 12px/1 system-ui;color:#4b5563;margin-bottom:6px}
+    .bar{height:8px;width:100%;background:#fff;border-radius:6px;overflow:hidden;border:1px solid var(--border)}
+    .bar .fill{height:100%;background:var(--brand);width:0%;transition:width .2s linear}
+
+    .stage{position:relative;display:flex;min-height:60vh;flex:1;overflow:hidden;border-radius:12px;background:#f3f4f6}
+
+    /* Overlays */
+    .overlay{position:absolute;inset:0;display:grid;place-items:center}
+    .overlay.countdown{background:rgba(255,255,255,.7)}
+    .overlay.rest{background:var(--brand-50);text-align:center}
+    .count{font:900 20vh/1 system-ui;color:#0f172a}
+    .rest-title{font:800 8vh/1 system-ui;color:#9a3412}
+    .rest-num{font:900 18vh/1 system-ui;color:#c2410c}
+    .rest-sub{margin-top:6px;font:600 12px/1 system-ui;color:#9a3412}
+
+    /* Stimulus */
+    .stimulus{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) scale(1);font-weight:900;text-align:center;text-shadow:0 4px 6px rgba(0,0,0,.12);user-select:none;will-change:transform}
+    .bg-layer{position:absolute;inset:0;opacity:.9}
+
+    footer{border-top:1px solid var(--border);background:#fff}
+    footer .bar{padding:10px 0;color:#6b7280;font-size:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
+  </style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="container bar">
+      <div class="brand">
+        <div class="logo"><span>LFDS</span></div>
+        <div>
+          <div style="font:800 13px/1 system-ui;letter-spacing:.02em">LA FORGE DES SOMMETS</div>
+          <div style="font:600 11px/1 system-ui;color:#6b7280">Neurocognition · Réactivité</div>
+        </div>
       </div>
-      <input
-        type="number"
-        inputMode="numeric"
-        min={min}
-        max={max}
-        step={step}
-        value={local}
-        onChange={(e) => setLocal(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => { if (e.key === "Enter") { e.currentTarget.blur(); } }}
-        className="w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
-      />
-      {unit ? <div className="mt-1 text-[11px] text-neutral-500">Unité : {unit}{step ? ` • pas ${step}` : ''}</div> : null}
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="button" id="btn-toggle-fs">Plein écran (F)</button>
+      </div>
     </div>
-  );
+  </header>
+
+  <main class="container layout">
+    <!-- Panneau gauche -->
+    <aside class="panel">
+      <div class="section">
+        <h2>Mode <span style="font:600 11px/1 system-ui;color:#6b7280;margin-left:8px">(Espace = Start/Stop)</span></h2>
+        <div class="chips" id="mode-chips"></div>
+      </div>
+
+      <div class="section">
+        <h2>Sélections</h2>
+        <div class="section">
+          <h3>Couleurs (texte/éléments)</h3>
+          <div class="box"><div class="swatches" id="swatches-colors"></div></div>
+        </div>
+        <div class="section" id="sec-numbers" style="display:none">
+          <h3>Chiffres</h3>
+          <div class="box"><div class="chips" id="chips-numbers"></div></div>
+        </div>
+        <div class="section" id="sec-dirs" style="display:none">
+          <h3>Directions</h3>
+          <div class="box"><div class="chips" id="chips-dirs"></div></div>
+        </div>
+        <div class="section" id="sec-bgs" style="display:none">
+          <h3>Couleurs de fond</h3>
+          <div class="box"><div class="swatches" id="swatches-bgs"></div></div>
+        </div>
+        <div class="section" id="sec-multi" style="display:none">
+          <h3>Types inclus (Multi)</h3>
+          <div class="box"><div class="chips" id="chips-multi"></div></div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Paramètres</h2>
+        <div class="grid2">
+          <div>
+            <label class="lbl">Durée d’apparition</label>
+            <input type="number" id="inp-appear" min="50" max="5000" step="50" value="500">
+            <div style="font:600 11px/1 system-ui;color:#6b7280">ms (pas 50)</div>
+          </div>
+          <div>
+            <label class="lbl">Intervalle entre apparitions</label>
+            <input type="number" id="inp-interval" min="0" max="5000" step="50" value="500">
+            <div style="font:600 11px/1 system-ui;color:#6b7280">ms (pas 50)</div>
+          </div>
+        </div>
+
+        <div class="grid2" style="margin-top:12px">
+          <div>
+            <label class="lbl">Type de répétition</label>
+            <div class="chips">
+              <button class="chip active" data-reptype="apparitions">Apparitions</button>
+              <button class="chip" data-reptype="duree">Durée</button>
+            </div>
+          </div>
+          <div>
+            <label class="lbl">Taille du stimulus</label>
+            <input type="range" id="inp-size" min="8" max="40" step="1" value="24">
+          </div>
+        </div>
+
+        <div class="grid2" style="margin-top:12px">
+          <div>
+            <label class="lbl">Sets</label>
+            <input type="number" id="inp-sets" min="1" max="999" step="1" value="3">
+          </div>
+          <div id="box-reps">
+            <label class="lbl">Répétitions / set</label>
+            <input type="number" id="inp-reps" min="1" max="999" step="1" value="20">
+          </div>
+          <div id="box-duration" style="display:none">
+            <label class="lbl">Durée par set</label>
+            <input type="number" id="inp-setdur" min="1" max="3600" step="1" value="30">
+            <div style="font:600 11px/1 system-ui;color:#6b7280">secondes</div>
+          </div>
+        </div>
+
+        <div style="margin-top:12px">
+          <label class="lbl">Récupération entre sets</label>
+          <input type="number" id="inp-rest" min="1" max="3600" step="1" value="30">
+          <div style="font:600 11px/1 system-ui;color:#6b7280">secondes</div>
+        </div>
+
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-top:10px">
+          <label class="checkbox"><input type="checkbox" id="chk-rand"> Emplacement aléatoire (marges de sécurité)</label>
+          <label class="checkbox"><input type="checkbox" id="chk-beep"> Bip au début de chaque apparition</label>
+          <label class="checkbox"><input type="checkbox" id="chk-autofs"> Plein écran au démarrage (zone stimuli)</label>
+        </div>
+
+        <div class="actions" style="margin-top:12px">
+          <button class="button" id="btn-start">Démarrer</button>
+          <button class="button btn-outline" id="btn-stop" style="display:none">Stop</button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Zone de stimuli (shell plein écran) -->
+    <section class="stage-shell" id="stage-shell">
+      <button class="fs-exit" id="btn-exit-fs" style="display:none">Quitter plein écran</button>
+
+      <div class="progress">
+        <div class="card">
+          <div class="row"><span>Set</span><span id="txt-set">0/0</span></div>
+          <div class="bar"><div class="fill" id="bar-set"></div></div>
+        </div>
+        <div class="card">
+          <div class="row"><span id="lbl-rep">Répétitions</span><span id="txt-rep">0/0</span></div>
+          <div class="bar"><div class="fill" id="bar-rep"></div></div>
+        </div>
+      </div>
+
+      <div class="stage" id="stage">
+        <div class="overlay countdown" id="ov-count" style="display:none"><div class="count" id="count-num">3</div></div>
+        <div class="overlay rest" id="ov-rest" style="display:none">
+          <div>
+            <div class="rest-title">RÉCUP</div>
+            <div class="rest-num" id="rest-num">0</div>
+            <div class="rest-sub">secondes</div>
+          </div>
+        </div>
+        <!-- layers injectés ici -->
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container bar">
+      <div>© <span id="year"></span> La Forge des Sommets — Prototype d’entraînement neurocognitif</div>
+      <div>Thème clair • Orange & Noir · Espace: Start/Stop · F: Plein écran</div>
+    </div>
+  </footer>
+</div>
+
+<script>
+// ========= Données =========
+const COLORS = [
+  { name: 'ROUGE', hex: '#E53935' },
+  { name: 'VERT', hex: '#43A047' },
+  { name: 'BLEU', hex: '#1E88E5' },
+  { name: 'JAUNE', hex: '#FDD835' },
+  { name: 'ORANGE', hex: '#FB8C00' },
+  { name: 'VIOLET', hex: '#8E24AA' },
+  { name: 'ROSE', hex: '#E91E63' },
+  { name: 'NOIR', hex: '#111111' },
+  { name: 'BLANC', hex: '#FFFFFF', outline: true },
+  { name: 'GRIS', hex: '#9E9E9E' },
+  { name: 'MARRON', hex: '#6D4C41' },
+];
+const NUMBERS = Array.from({length:10}, (_,i)=>i);
+const DIRECTIONS = [
+  { key: 'haut', label: '↑' }, { key: 'bas', label: '↓' }, { key: 'gauche', label: '←' }, { key: 'droite', label: '→' },
+  { key: 'haut_droite', label: '↗' }, { key: 'bas_droite', label: '↘' }, { key: 'bas_gauche', label: '↙' }, { key: 'haut_gauche', label: '↖' },
+];
+
+const state = {
+  mode: 'stroop',
+  repType: 'apparitions',
+  selectedColors: COLORS.map(c=>c.name),
+  selectedBgColors: COLORS.map(c=>c.name),
+  selectedNumbers: [...NUMBERS],
+  selectedDirections: DIRECTIONS.map(d=>d.key),
+  appearanceMs: 500,
+  intervalMs: 500,
+  sets: 3,
+  reps: 20,
+  setDurationSec: 30,
+  restSec: 30,
+  sizeVH: 24,
+  randomPos: false,
+  beep: false,
+  autoFullscreen: false,
+  multiPool: { stroop:true, chiffres:true, couleur:true, directions:true, chiffreCouleur:true, directionCouleur:true },
+  // runtime
+  phase:'idle', currentSet:0, currentRep:0, runningSetElapsedMs:0, visible:false,
+  cancelled:false,
+  lastStimulus:null,
 };
-const Slider = ({ label, value, min, max, step, onChange, unit }) => (
-  <div>
-    <div className="mb-2 flex items-center justify-between">
-      <span className="text-xs font-medium text-neutral-600">{label}</span>
-      <span className="rounded-md bg-neutral-50 px-2 py-1 text-xs font-semibold text-neutral-700">{value}{unit}</span>
-    </div>
-    <input
-      type="range"
-      min={min}
-      max={max}
-      step={step}
-      value={value}
-      onChange={(e) => onChange(Number(e.target.value))}
-      className="h-2 w-full cursor-pointer appearance-none rounded-lg bg-neutral-200 accent-orange-500"
-    />
-  </div>
-);
 
-// ==================== Stimulus visuel (anti-dépassement + position sûre) ====================
-function Stimulus({ content, bgColor, sizeVH, randomPos }) {
-  const containerRef = useRef(null);
-  const nodeRef = useRef(null);
-  const [containerSize, setContainerSize] = useState({ w: 0, h: 0 });
-  const [fontPx, setFontPx] = useState(0);
-  const [scale, setScale] = useState(1);
-  const [pos, setPos] = useState({ top: "50%", left: "50%" });
-  const MARGIN = 24; // marge de sécurité
+const randFrom = (arr)=>arr[Math.floor(Math.random()*arr.length)];
+const clamp=(n,lo,hi)=>Math.max(lo,Math.min(hi,n));
 
-  // Observe la taille du conteneur (rotation, plein écran, split, etc.)
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver((entries) => {
-      const r = entries[0].contentRect;
-      setContainerSize({ w: r.width, h: r.height });
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+// ========= Raccourcis =========
+const q = (id)=>document.getElementById(id);
+const stageShell = q('stage-shell');
+const stage = q('stage');
+const ovCount = q('ov-count');
+const countNum = q('count-num');
+const ovRest = q('ov-rest');
+const restNum = q('rest-num');
+const txtSet = q('txt-set');
+const txtRep = q('txt-rep');
+const lblRep = q('lbl-rep');
+const barSet = q('bar-set');
+const barRep = q('bar-rep');
 
-  // Calcule la taille de police de base en px à partir de la hauteur du conteneur
-  useEffect(() => {
-    if (!containerSize.h) return;
-    setFontPx((sizeVH / 100) * containerSize.h);
-  }, [containerSize.h, sizeVH]);
+q('year').textContent = new Date().getFullYear();
 
-  // Mesure le contenu et ajuste l'échelle + la position pour éviter tout dépassement
-  useEffect(() => {
-    if (!nodeRef.current || !containerSize.w || !containerSize.h) return;
-    // Laisser React peindre, puis mesurer
-    const raf = requestAnimationFrame(() => {
-      const node = nodeRef.current;
-      const contW = containerSize.w;
-      const contH = containerSize.h;
+// ========= Modes =========
+const MODES = [ ['stroop','Stroop'], ['chiffres','Chiffres'], ['couleur','Couleur'], ['directions','Directions'], ['chiffreCouleur','Chiffre + Couleur'], ['directionCouleur','Direction + Couleur'], ['multi','Multi'] ];
+const modeChips = q('mode-chips');
+MODES.forEach(([key,label])=>{
+  const b=document.createElement('button'); b.className='chip'+(state.mode===key?' active':''); b.textContent=label; b.dataset.mode=key;
+  b.addEventListener('click', ()=>{ state.mode=key; updateVisibility(); refreshModeChips(); });
+  modeChips.appendChild(b);
+});
+function refreshModeChips(){ Array.from(modeChips.children).forEach(ch=> ch.classList.toggle('active', ch.dataset.mode===state.mode)); }
 
-      // Mesure à l'échelle 1 au centre
-      node.style.transform = "translate(-50%, -50%) scale(1)";
-      node.style.top = "50%";
-      node.style.left = "50%";
-      const box = node.getBoundingClientRect();
-
-      const availW = Math.max(1, contW - MARGIN * 2);
-      const availH = Math.max(1, contH - MARGIN * 2);
-      let sc = Math.min(availW / box.width, availH / box.height);
-      if (!Number.isFinite(sc) || sc <= 0) sc = 1;
-      sc = Math.min(sc, 1); // ne jamais agrandir au-delà de 1
-
-      // Position sûre si aléatoire
-      if (randomPos) {
-        const w = box.width * sc;
-        const h = box.height * sc;
-        const minX = MARGIN + w / 2;
-        const maxX = contW - (MARGIN + w / 2);
-        const minY = MARGIN + h / 2;
-        const maxY = contH - (MARGIN + h / 2);
-        const left = maxX >= minX ? Math.random() * (maxX - minX) + minX : contW / 2;
-        const top = maxY >= minY ? Math.random() * (maxY - minY) + minY : contH / 2;
-        setPos({ top: `${top}px`, left: `${left}px` });
-      } else {
-        setPos({ top: "50%", left: "50%" });
-      }
-      setScale(sc);
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [content, fontPx, randomPos, containerSize.w, containerSize.h]);
-
-  return (
-    <div ref={containerRef} className="relative flex h-full w-full items-center justify-center overflow-hidden">
-      {bgColor ? <div className="absolute inset-0" style={{ background: bgColor, opacity: 0.9 }} /> : null}
-      {content ? (
-        <div
-          ref={nodeRef}
-          className="absolute select-none text-center font-extrabold tracking-tight will-change-transform"
-          style={{ fontSize: fontPx ? `${fontPx}px` : undefined, top: pos.top, left: pos.left, transform: `translate(-50%, -50%) scale(${scale})` }}
-        >
-          {content}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-// ==================== App ====================
-export default function App() {
-  // thème clair
-  useEffect(() => { document.documentElement.classList.remove("dark"); }, []);
-
-  // ------- États -------
-  const [mode, setMode] = useState("stroop");
-  const [repType, setRepType] = useState("apparitions"); // apparitions | duree
-
-  const [selectedColors, setSelectedColors] = useState(DEFAULT_COLORS.map((c) => c.name));
-  const [selectedBgColors, setSelectedBgColors] = useState(DEFAULT_COLORS.map((c) => c.name));
-  const [selectedNumbers, setSelectedNumbers] = useState(DEFAULT_NUMBERS);
-  const [selectedDirections, setSelectedDirections] = useState(ALL_DIRECTIONS.map((d) => d.key));
-
-  const [appearanceMs, setAppearanceMs] = useState(500);
-  const [intervalMs, setIntervalMs] = useState(500);
-  const [sets, setSets] = useState(3);
-  const [reps, setReps] = useState(20);
-  const [setDurationSec, setSetDurationSec] = useState(30);
-  const [restSec, setRestSec] = useState(30);
-  const [sizeVH, setSizeVH] = useState(24);
-  const [randomPos, setRandomPos] = useState(false);
-  const [beepEnabled, setBeepEnabled] = useState(false);
-  const [autoFullscreen, setAutoFullscreen] = useState(false);
-
-  const [multiPool, setMultiPool] = useState({
-    stroop: true,
-    chiffres: true,
-    couleur: true,
-    directions: true,
-    chiffreCouleur: true,
-    directionCouleur: true,
+// ========= Sélections =========
+const swColors = q('swatches-colors');
+const swBgs = q('swatches-bgs');
+function makeSwatch(container, list, selectedArr){
+  container.innerHTML='';
+  list.forEach(c=>{
+    const b=document.createElement('button'); b.className='swatch'; b.style.background=c.hex; b.title=c.name; b.dataset.name=c.name;
+    b.textContent=c.outline ? c.name : c.name.slice(0,2);
+    if(c.outline){ b.style.color='#111'; b.style.fontSize='9px'; }
+    b.classList.toggle('active', selectedArr.includes(c.name));
+    b.addEventListener('click', ()=>{ const i=selectedArr.indexOf(c.name); if(i>=0) selectedArr.splice(i,1); else selectedArr.push(c.name); b.classList.toggle('active', selectedArr.includes(c.name)); });
+    container.appendChild(b);
   });
-
-  const [phase, setPhase] = useState("idle"); // idle | countdown | running | rest | finished
-  const [currentSet, setCurrentSet] = useState(0);
-  const [currentRep, setCurrentRep] = useState(0);
-  const [visible, setVisible] = useState(false);
-  const [stimulusNode, setStimulusNode] = useState(null);
-  const [stimulusBg, setStimulusBg] = useState(null);
-  const [countdown, setCountdown] = useState(3);
-  const [restCountdown, setRestCountdown] = useState(0);
-  const [runningSetElapsedMs, setRunningSetElapsedMs] = useState(0);
-
-  const { beep } = useBeep();
-  const rafRef = useRef(null);
-  const cancelRef = useRef({ cancelled: false });
-
-  // plein écran ciblé sur la zone stage+progress
-  const stageShellRef = useRef(null);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  useEffect(() => {
-    const onFs = () => setIsFullscreen(!!document.fullscreenElement);
-    document.addEventListener("fullscreenchange", onFs);
-    return () => document.removeEventListener("fullscreenchange", onFs);
-  }, []);
-  const enterFullscreen = async () => { try { await stageShellRef.current?.requestFullscreen?.({ navigationUI: "hide" }); } catch {} };
-  const exitFullscreen = async () => { try { if (document.fullscreenElement) await document.exitFullscreen(); } catch {} };
-  const toggleFullscreen = () => (document.fullscreenElement ? exitFullscreen() : enterFullscreen());
-
-  // ------- Sélections actives -------
-  const colorEntries = useMemo(() => DEFAULT_COLORS.filter((c) => selectedColors.includes(c.name)), [selectedColors]);
-  const bgEntries = useMemo(() => DEFAULT_COLORS.filter((c) => selectedBgColors.includes(c.name)), [selectedBgColors]);
-  const dirEntries = useMemo(() => ALL_DIRECTIONS.filter((d) => selectedDirections.includes(d.key)), [selectedDirections]);
-  const numberValues = useMemo(() => [...selectedNumbers].sort((a,b)=>a-b), [selectedNumbers]);
-
-  // ------- Génération d'un stimulus selon le mode -------
-  const makeStimulus = (pickMode = mode) => {
-    const pickColor = () => randFrom(colorEntries);
-    const pickBg = () => randFrom(bgEntries);
-    const pickNum = () => randFrom(numberValues);
-    const pickDir = () => randFrom(dirEntries);
-
-    if (!colorEntries.length || (!bgEntries.length && (pickMode === 'chiffreCouleur' || pickMode === 'directionCouleur'))) return { node: null, bg: null };
-
-    if (pickMode === "stroop") {
-      const word = pickColor();
-      const ink = pickColor();
-      return { node: <span style={{ color: ink.hex }}>{word.name}</span>, bg: null };
-    }
-    if (pickMode === "chiffres") {
-      const n = pickNum();
-      const ink = pickColor();
-      return { node: <span style={{ color: ink.hex }}>{n}</span>, bg: null };
-    }
-    if (pickMode === "couleur") {
-      const c = pickColor();
-      return { node: null, bg: c.hex };
-    }
-    if (pickMode === "directions") {
-      const d = pickDir();
-      return { node: <span style={{ color: "#111" }}>{d.label}</span>, bg: null };
-    }
-    if (pickMode === "chiffreCouleur") {
-      const n = pickNum();
-      const ink = pickColor();
-      const bg = pickBg();
-      return { node: <span style={{ color: ink.hex }}>{n}</span>, bg: bg.hex };
-    }
-    if (pickMode === "directionCouleur") {
-      const d = pickDir();
-      const ink = pickColor();
-      const bg = pickBg();
-      return { node: <span style={{ color: ink.hex }}>{d.label}</span>, bg: bg.hex };
-    }
-    // multi
-    const allowed = Object.keys(multiPool).filter((k) => multiPool[k]);
-    const m = allowed.length ? randFrom(allowed) : randFrom(["stroop", "chiffres", "couleur", "directions", "chiffreCouleur", "directionCouleur"]);
-    return makeStimulus(m);
-  };
-
-  // ------- Orchestration -------
-  const stopSession = () => {
-    cancelRef.current.cancelled = true;
-    setPhase("idle");
-    setCurrentSet(0);
-    setCurrentRep(0);
-    setVisible(false);
-    setRunningSetElapsedMs(0);
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-  };
-
-  const runSet = async (index) => {
-    setCurrentSet(index + 1);
-    setCurrentRep(0);
-    setRunningSetElapsedMs(0);
-    const start = performance.now();
-
-    const tick = () => {
-      setRunningSetElapsedMs(performance.now() - start);
-      if (!cancelRef.current.cancelled && phase === "running") rafRef.current = requestAnimationFrame(tick);
-    };
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    rafRef.current = requestAnimationFrame(tick);
-
-    if (repType === "apparitions") {
-      for (let i = 0; i < reps; i++) {
-        if (cancelRef.current.cancelled) return;
-        setCurrentRep(i + 1);
-        const st = makeStimulus();
-        setStimulusNode(st.node);
-        setStimulusBg(st.bg || null);
-        setVisible(true);
-        if (beepEnabled) beep();
-        await new Promise((r) => setTimeout(r, appearanceMs));
-        setVisible(false);
-        await new Promise((r) => setTimeout(r, intervalMs));
-      }
-    } else {
-      const hard = setDurationSec * 1000;
-      let count = 0;
-      while (!cancelRef.current.cancelled && performance.now() - start < hard) {
-        setCurrentRep(++count);
-        const st = makeStimulus();
-        setStimulusNode(st.node);
-        setStimulusBg(st.bg || null);
-        setVisible(true);
-        if (beepEnabled) beep();
-        await new Promise((r) => setTimeout(r, appearanceMs));
-        setVisible(false);
-        const remaining = hard - (performance.now() - start);
-        if (remaining <= 0) break;
-        await new Promise((r) => setTimeout(r, Math.min(intervalMs, remaining)));
-      }
-    }
-  };
-
-  const startSession = async () => {
-    cancelRef.current.cancelled = false;
-
-    // Si "plein écran au démarrage" est activé, on tente immédiatement (geste utilisateur)
-    if (autoFullscreen && !document.fullscreenElement) {
-      await enterFullscreen();
-    }
-
-    setPhase("countdown");
-    setCountdown(3);
-    for (let c = 3; c > 0; c--) {
-      if (cancelRef.current.cancelled) return stopSession();
-      setCountdown(c);
-      await new Promise((r) => setTimeout(r, 1000));
-    }
-
-    for (let s = 0; s < sets; s++) {
-      if (cancelRef.current.cancelled) return stopSession();
-      setPhase("running");
-      await runSet(s);
-      if (s < sets - 1) {
-        setPhase("rest");
-        setRestCountdown(restSec);
-        for (let t = restSec; t > 0; t--) {
-          if (cancelRef.current.cancelled) return stopSession();
-          setRestCountdown(t);
-          await new Promise((r) => setTimeout(r, 1000));
-        }
-        if (beepEnabled) beep(250, 660, 0.25);
-      }
-    }
-    setPhase("finished");
-  };
-
-  // Raccourcis
-  useEffect(() => {
-    const onKey = (e) => {
-      if (e.code === "Space") { e.preventDefault(); (phase === "idle" || phase === "finished") ? startSession() : stopSession(); }
-      if (e.key && e.key.toLowerCase() === "f") { toggleFullscreen(); }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [phase, sets, reps, appearanceMs, intervalMs, repType, setDurationSec, restSec, autoFullscreen]);
-
-  // Progress
-  const setProgress = currentSet / Math.max(1, sets);
-  const repProgress = repType === "apparitions" ? (reps ? currentRep / reps : 0) : clamp(runningSetElapsedMs / Math.max(1, setDurationSec * 1000), 0, 1);
-
-  // ==================== UI ====================
-  return (
-    <div className="flex min-h-[100dvh] w-screen flex-col bg-neutral-50 text-neutral-900">{/* 100dvh pour mobiles */}
-      {/* Header */}
-      <header className="sticky top-0 z-10 border-b border-neutral-200 bg-white/80 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-2">
-          <div className="flex items-center gap-3">
-            <div className="grid h-10 w-10 place-items-center overflow-hidden rounded-lg border border-neutral-200 bg-white">
-              <span className="text-xs font-bold text-neutral-500">LFDS</span>
-            </div>
-            <div>
-              <div className="text-sm font-bold tracking-wide">LA FORGE DES SOMMETS</div>
-              <div className="text-xs text-neutral-500">Neurocognition · Réactivité</div>
-            </div>
-          </div>
-          <button onClick={toggleFullscreen} className="rounded-lg bg-orange-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-orange-700">
-            {isFullscreen ? "Quitter plein écran" : "Plein écran (F)"}
-          </button>
-        </div>
-      </header>
-
-      {/* Main layout */}
-      <div className="mx-auto grid w-full max-w-7xl flex-1 grid-cols-1 gap-4 p-4 md:grid-cols-[360px,1fr]">
-        {/* Controls */}
-        <aside className="space-y-4">
-          <Panel>
-            <div className="mb-3 flex items-center justify-between">
-              <div className="text-sm font-semibold">Mode</div>
-              <div className="text-[11px] font-medium text-neutral-500">Espace = Start/Stop</div>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {[
-                ["stroop", "Stroop"],
-                ["chiffres", "Chiffres"],
-                ["couleur", "Couleur"],
-                ["directions", "Directions"],
-                ["chiffreCouleur", "Chiffre + Couleur"],
-                ["directionCouleur", "Direction + Couleur"],
-                ["multi", "Multi"],
-              ].map(([k, label]) => (
-                <Chip key={k} active={mode === k} onClick={() => setMode(k)}>{label}</Chip>
-              ))}
-            </div>
-          </Panel>
-
-          <Panel>
-            <div className="mb-3 text-sm font-semibold">Sélections</div>
-            {/* Couleurs */}
-            {["stroop", "chiffres", "couleur", "chiffreCouleur", "directionCouleur", "multi"].includes(mode) && (
-              <Section title="Couleurs (texte/éléments)">
-                <div className="flex flex-wrap gap-2">
-                  {DEFAULT_COLORS.map((c) => (
-                    <ColorSwatch key={c.name} color={c} active={selectedColors.includes(c.name)} onToggle={() => setSelectedColors((prev) => prev.includes(c.name) ? prev.filter((x) => x !== c.name) : [...prev, c.name])} />
-                  ))}
-                </div>
-              </Section>
-            )}
-            {/* Chiffres */}
-            {["chiffres", "chiffreCouleur", "multi"].includes(mode) && (
-              <Section title="Chiffres">
-                <div className="flex flex-wrap gap-2">
-                  {DEFAULT_NUMBERS.map((n) => (
-                    <Chip key={n} active={selectedNumbers.includes(n)} onClick={() => setSelectedNumbers((p) => p.includes(n) ? p.filter((x)=>x!==n) : [...p, n])}>{n}</Chip>
-                  ))}
-                </div>
-              </Section>
-            )}
-            {/* Directions */}
-            {["directions", "directionCouleur", "multi"].includes(mode) && (
-              <Section title="Directions">
-                <div className="flex flex-wrap gap-2">
-                  {ALL_DIRECTIONS.map((d) => (
-                    <Chip key={d.key} active={selectedDirections.includes(d.key)} onClick={() => setSelectedDirections((p) => p.includes(d.key) ? p.filter((x)=>x!==d.key) : [...p, d.key])}>{d.label}</Chip>
-                  ))}
-                </div>
-              </Section>
-            )}
-            {/* Fonds */}
-            {["chiffreCouleur", "directionCouleur", "multi"].includes(mode) && (
-              <Section title="Couleurs de fond">
-                <div className="flex flex-wrap gap-2">
-                  {DEFAULT_COLORS.map((c) => (
-                    <ColorSwatch key={c.name+"bg"} color={c} active={selectedBgColors.includes(c.name)} onToggle={() => setSelectedBgColors((prev) => prev.includes(c.name) ? prev.filter((x) => x !== c.name) : [...prev, c.name])} />
-                  ))}
-                </div>
-              </Section>
-            )}
-            {/* Multi */}
-            {mode === "multi" && (
-              <Section title="Types inclus dans le tirage aléatoire">
-                <div className="flex flex-wrap gap-2">
-                  {Object.entries({
-                    stroop: "Stroop",
-                    chiffres: "Chiffres",
-                    couleur: "Couleur",
-                    directions: "Directions",
-                    chiffreCouleur: "Chiffre + Couleur",
-                    directionCouleur: "Direction + Couleur",
-                  }).map(([k, label]) => (
-                    <Chip key={k} active={!!multiPool[k]} onClick={() => setMultiPool((p) => ({ ...p, [k]: !p[k] }))}>{label}</Chip>
-                  ))}
-                </div>
-              </Section>
-            )}
-          </Panel>
-
-          <Panel>
-            <div className="mb-3 text-sm font-semibold">Paramètres</div>
-            <div className="grid gap-4">
-              <NumberInput label="Durée d’apparition" value={appearanceMs} onChange={setAppearanceMs} min={50} max={5000} step={50} unit="ms" />
-              <NumberInput label="Intervalle entre apparitions" value={intervalMs} onChange={setIntervalMs} min={0} max={5000} step={50} unit="ms" />
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <div className="mb-2 text-xs font-medium text-neutral-600">Type de répétition</div>
-                  <div className="flex gap-2">
-                    <Chip active={repType === "apparitions"} onClick={() => setRepType("apparitions")}>Apparitions</Chip>
-                    <Chip active={repType === "duree"} onClick={() => setRepType("duree")}>Durée</Chip>
-                  </div>
-                </div>
-                <div>
-                  <Slider label="Taille du stimulus" value={sizeVH} min={8} max={40} step={1} onChange={setSizeVH} unit="vh" />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <NumberInput label="Sets" value={sets} onChange={setSets} min={1} max={999} step={1} />
-                {repType === "apparitions" ? (
-                  <NumberInput label="Répétitions / set" value={reps} onChange={setReps} min={1} max={999} step={1} />
-                ) : (
-                  <NumberInput label="Durée par set" value={setDurationSec} onChange={setSetDurationSec} min={1} max={3600} step={1} unit="s" />
-                )}
-              </div>
-
-              <NumberInput label="Récupération entre sets" value={restSec} onChange={setRestSec} min={1} max={3600} step={1} unit="s" />
-
-              <div className="flex flex-col gap-2 pt-1">
-                <label className="flex cursor-pointer items-center gap-2 text-sm">
-                  <input type="checkbox" className="h-4 w-4 accent-orange-600" checked={randomPos} onChange={(e) => setRandomPos(e.target.checked)} />
-                  Emplacement aléatoire (marges de sécurité)
-                </label>
-                <label className="flex cursor-pointer items-center gap-2 text-sm">
-                  <input type="checkbox" className="h-4 w-4 accent-orange-600" checked={beepEnabled} onChange={(e) => setBeepEnabled(e.target.checked)} />
-                  Bip au début de chaque apparition
-                </label>
-                <label className="flex cursor-pointer items-center gap-2 text-sm">
-                  <input type="checkbox" className="h-4 w-4 accent-orange-600" checked={autoFullscreen} onChange={(e) => setAutoFullscreen(e.target.checked)} />
-                  Plein écran au démarrage (zone stimuli)
-                </label>
-              </div>
-
-              <div className="flex items-center gap-2 pt-2">
-                {(phase === "idle" || phase === "finished") && (
-                  <button onClick={startSession} className="flex-1 rounded-xl bg-orange-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-orange-700">Démarrer</button>
-                )}
-                {(phase === "countdown" || phase === "running" || phase === "rest") && (
-                  <button onClick={stopSession} className="flex-1 rounded-xl border border-orange-200 bg-white px-4 py-2.5 text-sm font-semibold text-orange-700 hover:bg-orange-50">Stop</button>
-                )}
-              </div>
-            </div>
-          </Panel>
-        </aside>
-
-        {/* Stimulus stage + progression (élément cible du plein écran) */}
-        <main ref={stageShellRef} className="relative rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
-          {/* bouton quitter plein écran visible uniquement en mode FS (mobile) */}
-          {isFullscreen && (
-            <button onClick={exitFullscreen} className="absolute right-3 top-3 z-30 rounded-md bg-neutral-900/70 px-3 py-1.5 text-xs font-semibold text-white">
-              Quitter plein écran
-            </button>
-          )}
-
-          {/* bandeau progression */}
-          <div className="z-10 mb-3 grid grid-cols-1 gap-3 md:grid-cols-2">
-            <div className="rounded-lg bg-neutral-100 p-3">
-              <div className="mb-1 flex items-center justify-between text-xs font-semibold text-neutral-600">
-                <span>Set</span>
-                <span>{currentSet}/{sets}</span>
-              </div>
-              <div className="h-2 w-full overflow-hidden rounded bg-white"><div className="h-full bg-orange-500" style={{ width: `${Math.round(setProgress * 100)}%` }} /></div>
-            </div>
-            <div className="rounded-lg bg-neutral-100 p-3">
-              <div className="mb-1 flex items-center justify-between text-xs font-semibold text-neutral-600">
-                <span>{repType === 'apparitions' ? 'Répétitions' : 'Durée du set'}</span>
-                <span>{repType === 'apparitions' ? `${currentRep}/${reps}` : `${Math.floor(runningSetElapsedMs/1000)}s / ${setDurationSec}s`}</span>
-              </div>
-              <div className="h-2 w-full overflow-hidden rounded bg-white"><div className="h-full bg-orange-500" style={{ width: `${Math.round(repProgress * 100)}%` }} /></div>
-            </div>
-          </div>
-
-          <div className="relative flex min-h-[60vh] flex-1 overflow-hidden rounded-xl bg-neutral-100">
-            {phase === 'countdown' && (
-              <div className="absolute inset-0 z-20 grid place-items-center bg-white/70">
-                <div className="text-[20vh] font-black text-neutral-900">{countdown}</div>
-              </div>
-            )}
-            {phase === 'rest' && (
-              <div className="absolute inset-0 z-20 grid place-items-center bg-orange-50">
-                <div className="text-center">
-                  <div className="text-[8vh] font-extrabold text-orange-700">RÉCUP</div>
-                  <div className="text-[18vh] font-black leading-none text-orange-600">{restCountdown}</div>
-                  <div className="mt-2 text-sm font-medium text-orange-700">secondes</div>
-                </div>
-              </div>
-            )}
-            {phase === 'finished' && (
-              <div className="absolute inset-0 z-20 grid place-items-center bg-white/80">
-                <div className="rounded-2xl border border-neutral-200 bg-white px-10 py-8 text-center shadow-xl">
-                  <div className="mb-2 text-2xl font-extrabold text-neutral-900">Session terminée</div>
-                  <div className="text-neutral-600">Bravo ! Appuyez sur Démarrer pour relancer.</div>
-                </div>
-              </div>
-            )}
-
-            <div className="relative z-10 flex-1">
-              {visible && (
-                <Stimulus content={stimulusNode} bgColor={stimulusBg} sizeVH={sizeVH} randomPos={randomPos} />
-              )}
-            </div>
-          </div>
-        </main>
-      </div>
-
-      <footer className="border-t border-neutral-200 bg-white/60">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3 text-xs text-neutral-500">
-          <div>© {new Date().getFullYear()} La Forge des Sommets — Prototype d’entraînement neurocognitif</div>
-          <div className="flex items-center gap-2">
-            <span className="hidden md:inline">Thème clair • Orange & Noir</span>
-            <span>·</span>
-            <span>Espace: Start/Stop</span>
-            <span>·</span>
-            <span>F: Plein écran</span>
-          </div>
-        </div>
-      </footer>
-    </div>
-  );
 }
+makeSwatch(swColors, COLORS, state.selectedColors);
+makeSwatch(swBgs, COLORS, state.selectedBgColors);
+
+const chipsNumbers = q('chips-numbers');
+NUMBERS.forEach(n=>{ const b=document.createElement('button'); b.className='chip active'; b.textContent=String(n); b.dataset.n=String(n);
+  b.addEventListener('click', ()=>{ const v=Number(b.dataset.n); const i=state.selectedNumbers.indexOf(v); if(i>=0){ state.selectedNumbers.splice(i,1); b.classList.remove('active'); } else { state.selectedNumbers.push(v); b.classList.add('active'); } });
+  chipsNumbers.appendChild(b);
+});
+
+const chipsDirs = q('chips-dirs');
+DIRECTIONS.forEach(d=>{ const b=document.createElement('button'); b.className='chip active'; b.textContent=d.label; b.dataset.key=d.key;
+  b.addEventListener('click', ()=>{ const k=b.dataset.key; const i=state.selectedDirections.indexOf(k); if(i>=0){ state.selectedDirections.splice(i,1); b.classList.remove('active'); } else { state.selectedDirections.push(k); b.classList.add('active'); } });
+  chipsDirs.appendChild(b);
+});
+
+const chipsMulti = q('chips-multi');
+const multiMap = { stroop:'Stroop', chiffres:'Chiffres', couleur:'Couleur', directions:'Directions', chiffreCouleur:'Chiffre + Couleur', directionCouleur:'Direction + Couleur' };
+Object.entries(multiMap).forEach(([k,label])=>{ const b=document.createElement('button'); b.className='chip active'; b.textContent=label; b.dataset.k=k; b.addEventListener('click', ()=>{ state.multiPool[k]=!state.multiPool[k]; b.classList.toggle('active', !!state.multiPool[k]); }); chipsMulti.appendChild(b); });
+
+// ========= Inputs =========
+const inpAppear=q('inp-appear'), inpInterval=q('inp-interval'), inpSets=q('inp-sets'), inpReps=q('inp-reps'), inpSetDur=q('inp-setdur'), inpRest=q('inp-rest'), inpSize=q('inp-size'), chkRand=q('chk-rand'), chkBeep=q('chk-beep'), chkAutoFS=q('chk-autofs');
+
+inpAppear.addEventListener('input', ()=> state.appearanceMs = clamp(Number(inpAppear.value)||500, 50, 5000));
+inpInterval.addEventListener('input', ()=> state.intervalMs = clamp(Number(inpInterval.value)||0, 0, 5000));
+inpSets.addEventListener('input', ()=> state.sets = clamp(Number(inpSets.value)||1, 1, 999));
+inpReps.addEventListener('input', ()=> state.reps = clamp(Number(inpReps.value)||1, 1, 999));
+inpSetDur.addEventListener('input', ()=> state.setDurationSec = clamp(Number(inpSetDur.value)||1, 1, 3600));
+inpRest.addEventListener('input', ()=> state.restSec = clamp(Number(inpRest.value)||1, 1, 3600));
+inpSize.addEventListener('input', ()=> state.sizeVH = clamp(Number(inpSize.value)||24, 8, 40));
+chkRand.addEventListener('change', ()=> state.randomPos = chkRand.checked);
+chkBeep.addEventListener('change', ()=> state.beep = chkBeep.checked);
+chkAutoFS.addEventListener('change', ()=> state.autoFullscreen = chkAutoFS.checked);
+
+// Rep type chips
+Array.from(document.querySelectorAll('[data-reptype]')).forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    Array.from(document.querySelectorAll('[data-reptype]')).forEach(x=>x.classList.remove('active'));
+    btn.classList.add('active');
+    state.repType = btn.dataset.reptype;
+    updateRepTypeUI();
+  })
+});
+
+function updateRepTypeUI(){
+  const byDur = state.repType==='duree';
+  q('box-reps').style.display = byDur ? 'none' : '';
+  q('box-duration').style.display = byDur ? '' : 'none';
+  lblRep.textContent = byDur ? 'Durée du set' : 'Répétitions';
+}
+function updateVisibility(){
+  const m=state.mode;
+  q('sec-numbers').style.display = (m==='chiffres'||m==='chiffreCouleur'||m==='multi') ? '' : 'none';
+  q('sec-dirs').style.display    = (m==='directions'||m==='directionCouleur'||m==='multi') ? '' : 'none';
+  q('sec-bgs').style.display     = (m==='chiffreCouleur'||m==='directionCouleur'||m==='multi') ? '' : 'none';
+  q('sec-multi').style.display   = (m==='multi') ? '' : 'none';
+}
+updateVisibility(); updateRepTypeUI();
+
+// ========= Beep =========
+let audioCtx=null; function ensureCtx(){ if(!audioCtx){ const C=window.AudioContext||window.webkitAudioContext; if(C) audioCtx=new C(); } return audioCtx; }
+function beep(d=150,f=880,v=.22){ try{ const c=ensureCtx(); if(!c) return; const o=c.createOscillator(); const g=c.createGain(); o.type='sine'; o.frequency.value=f; g.gain.value=v; o.connect(g); g.connect(c.destination); o.start(); setTimeout(()=>{ try{o.stop()}catch(e){} }, d); }catch(e){} }
+
+// ========= Stimulus (anti-dépassement + position sûre) =========
+function clearStimulus(){ Array.from(stage.querySelectorAll('.bg-layer,.stimulus')).forEach(n=>n.remove()); }
+
+function measureAndPlace(node, bg){
+  // Ajouter layers
+  if(bg){ const bgEl=document.createElement('div'); bgEl.className='bg-layer'; bgEl.style.background=bg; stage.appendChild(bgEl); }
+  stage.appendChild(node);
+
+  // Mesure à scale(1) centré
+  node.style.transform='translate(-50%, -50%) scale(1)';
+  node.style.top='50%'; node.style.left='50%';
+
+  const rectStage=stage.getBoundingClientRect();
+  const box=node.getBoundingClientRect();
+  const MARGIN=24;
+  const availW=Math.max(1,rectStage.width - MARGIN*2);
+  const availH=Math.max(1,rectStage.height - MARGIN*2);
+  let sc=Math.min(availW/box.width, availH/box.height);
+  if(!Number.isFinite(sc)||sc<=0) sc=1; sc=Math.min(sc,1);
+  // Position aléatoire sûre si demandé
+  if(state.randomPos){
+    const w=box.width*sc, h=box.height*sc;
+    const minX=MARGIN + w/2, maxX=rectStage.width - (MARGIN + w/2);
+    const minY=MARGIN + h/2, maxY=rectStage.height - (MARGIN + h/2);
+    const left=maxX>=minX ? Math.random()*(maxX-minX)+minX : rectStage.width/2;
+    const top =maxY>=minY ? Math.random()*(maxY-minY)+minY : rectStage.height/2;
+    node.style.left=left+'px'; node.style.top=top+'px';
+  }
+  node.style.transform=`translate(-50%, -50%) scale(${sc})`;
+}
+
+function showStimulus(){
+  clearStimulus();
+  const mode= state.mode==='multi' ? (function(){ const allowed=Object.entries(state.multiPool).filter(([,v])=>v).map(([k])=>k); const fallback=['stroop','chiffres','couleur','directions','chiffreCouleur','directionCouleur']; return randFrom(allowed.length?allowed:fallback); })() : state.mode;
+  let node=null, bg=null;
+  const pickColor=()=> randFrom(COLORS.filter(c=>state.selectedColors.includes(c.name)) || COLORS);
+  const pickBg=()=> randFrom(COLORS.filter(c=>state.selectedBgColors.includes(c.name)) || COLORS);
+  const pickNum=()=> randFrom(state.selectedNumbers.length?state.selectedNumbers:NUMBERS);
+  const pickDir=()=> randFrom(DIRECTIONS.filter(d=>state.selectedDirections.includes(d.key)) || DIRECTIONS);
+
+  if(mode==='stroop'){
+    const word=pickColor(); const ink=pickColor(); node=document.createElement('div'); node.textContent=word.name; node.style.color=ink.hex;
+  } else if(mode==='chiffres'){
+    const n=pickNum(); const ink=pickColor(); node=document.createElement('div'); node.textContent=String(n); node.style.color=ink.hex;
+  } else if(mode==='couleur'){
+    const c=pickColor(); bg=c.hex; node=null;
+  } else if(mode==='directions'){
+    const d=pickDir(); node=document.createElement('div'); node.textContent=d.label; node.style.color='#111';
+  } else if(mode==='chiffreCouleur'){
+    const n=pickNum(); const ink=pickColor(); const b=pickBg(); node=document.createElement('div'); node.textContent=String(n); node.style.color=ink.hex; bg=b.hex;
+  } else if(mode==='directionCouleur'){
+    const d=pickDir(); const ink=pickColor(); const b=pickBg(); node=document.createElement('div'); node.textContent=d.label; node.style.color=ink.hex; bg=b.hex;
+  }
+
+  if(bg){ const bgEl=document.createElement('div'); bgEl.className='bg-layer'; bgEl.style.background=bg; stage.appendChild(bgEl); }
+  if(node){ node.className='stimulus'; node.style.fontSize = state.sizeVH + 'vh'; measureAndPlace(node, null); }
+  state.lastStimulus = { node, bg };
+}
+
+function relayoutIfVisible(){
+  // En cas de rotation/resize, re-mesurer et replacer le stimulus actuel
+  const cur = stage.querySelector('.stimulus');
+  if(cur){ measureAndPlace(cur, null); }
+}
+
+window.addEventListener('resize', ()=>{ relayoutIfVisible(); });
+window.addEventListener('orientationchange', ()=>{ setTimeout(relayoutIfVisible, 120); });
+
+// ========= Progress =========
+function updateProgress(){
+  const setPct = (state.currentSet / Math.max(1, state.sets)) * 100; barSet.style.width = Math.round(setPct) + '%'; txtSet.textContent = state.currentSet + '/' + state.sets;
+  if(state.repType==='apparitions'){ const repPct = (state.reps? (state.currentRep/state.reps) : 0) * 100; barRep.style.width = Math.round(repPct) + '%'; txtRep.textContent = state.currentRep + '/' + state.reps; }
+  else { const pct = clamp(state.runningSetElapsedMs / Math.max(1, state.setDurationSec*1000), 0, 1) * 100; barRep.style.width = Math.round(pct) + '%'; txtRep.textContent = Math.floor(state.runningSetElapsedMs/1000) + 's / ' + state.setDurationSec + 's'; }
+}
+
+// ========= Session =========
+let rafId=0;
+function stopSession(){
+  state.cancelled=true; state.phase='idle'; state.currentSet=0; state.currentRep=0; state.visible=false; state.runningSetElapsedMs=0; clearStimulus(); updateProgress();
+  q('btn-start').style.display=''; q('btn-stop').style.display='none'; ovCount.style.display='none'; ovRest.style.display='none';
+}
+
+function tickElapsed(start){ state.runningSetElapsedMs = performance.now() - start; updateProgress(); if(!state.cancelled && state.phase==='running') rafId = requestAnimationFrame(()=>tickElapsed(start)); }
+
+async function runSet(index){
+  state.currentSet=index+1; state.currentRep=0; state.runningSetElapsedMs=0; updateProgress(); const start=performance.now(); cancelAnimationFrame(rafId); rafId=requestAnimationFrame(()=>tickElapsed(start));
+  if(state.repType==='apparitions'){
+    for(let i=0;i<state.reps;i++){
+      if(state.cancelled) return; state.currentRep=i+1; updateProgress(); showStimulus(); if(state.beep) beep(); await new Promise(r=>setTimeout(r,state.appearanceMs)); clearStimulus(); await new Promise(r=>setTimeout(r,state.intervalMs));
+    }
+  } else {
+    const hard=state.setDurationSec*1000; let count=0;
+    while(!state.cancelled && (performance.now()-start)<hard){ state.currentRep=++count; updateProgress(); showStimulus(); if(state.beep) beep(); await new Promise(r=>setTimeout(r,state.appearanceMs)); clearStimulus(); const remaining = hard - (performance.now()-start); if(remaining<=0) break; await new Promise(r=>setTimeout(r, Math.min(state.intervalMs, remaining))); }
+  }
+}
+
+async function startSession(){
+  state.cancelled=false;
+  // Plein écran au démarrage (sur la zone shell)
+  if(state.autoFullscreen && !document.fullscreenElement && stageShell.requestFullscreen){ try{ await stageShell.requestFullscreen({ navigationUI: 'hide' }); }catch(e){} }
+
+  state.phase='countdown'; for(let c=3;c>0;c--){ if(state.cancelled) return stopSession(); ovCount.style.display='grid'; countNum.textContent=String(c); await new Promise(r=>setTimeout(r,1000)); }
+  ovCount.style.display='none';
+
+  for(let s=0;s<state.sets;s++){
+    if(state.cancelled) return stopSession(); state.phase='running'; await runSet(s);
+    if(s<state.sets-1){ state.phase='rest'; for(let t=state.restSec;t>0;t--){ if(state.cancelled) return stopSession(); ovRest.style.display='grid'; restNum.textContent=String(t); await new Promise(r=>setTimeout(r,1000)); } ovRest.style.display='none'; if(state.beep) beep(250,660,0.25); }
+  }
+  state.phase='finished';
+}
+
+// ========= Boutons =========
+q('btn-start').addEventListener('click', startSession);
+q('btn-stop').addEventListener('click', stopSession);
+q('btn-toggle-fs').addEventListener('click', ()=>{ if(document.fullscreenElement) document.exitFullscreen(); else stageShell.requestFullscreen?.({navigationUI:'hide'}); });
+q('btn-exit-fs').addEventListener('click', ()=>{ if(document.fullscreenElement) document.exitFullscreen(); });
+
+// montrer/masquer bouton "Quitter plein écran"
+document.addEventListener('fullscreenchange', ()=>{ q('btn-exit-fs').style.display = document.fullscreenElement ? '' : 'none'; });
+
+// Clavier
+window.addEventListener('keydown', (e)=>{
+  if(e.code==='Space'){ e.preventDefault(); (state.phase==='idle'||state.phase==='finished')? startSession() : stopSession(); }
+  if(e.key && e.key.toLowerCase()==='f'){ if(document.fullscreenElement) document.exitFullscreen(); else stageShell.requestFullscreen?.({navigationUI:'hide'}); }
+});
+
+// ========= UI init =========
+function setMode(m){ state.mode=m; updateVisibility(); refreshModeChips(); }
+function refreshModeChips(){ Array.from(modeChips.children).forEach(ch=> ch.classList.toggle('active', ch.dataset.mode===state.mode)); }
+
+// Year
+
+// ========= Handle rotation friendly 100vh on iOS =========
+function setMobileVh(){ document.documentElement.style.setProperty('--app-vh', window.innerHeight*0.01 + 'px'); }
+window.addEventListener('resize', setMobileVh); window.addEventListener('orientationchange', ()=> setTimeout(setMobileVh, 150)); setMobileVh();
+
+</script>
+</body>
+</html>
