@@ -232,7 +232,9 @@
 </div>
 
 <script>
-// ========= Données =========
+"use strict";
+
+/* ==================== Données ==================== */
 const COLORS = [
   { name: 'ROUGE', hex: '#E53935' },
   { name: 'VERT', hex: '#43A047' },
@@ -273,15 +275,14 @@ const state = {
   autoFullscreen: false,
   multiPool: { stroop:true, chiffres:true, couleur:true, directions:true, chiffreCouleur:true, directionCouleur:true },
   // runtime
-  phase:'idle', currentSet:0, currentRep:0, runningSetElapsedMs:0, visible:false,
+  phase:'idle', currentSet:0, currentRep:0, runningSetElapsedMs:0,
   cancelled:false,
-  lastStimulus:null,
 };
 
 const randFrom = (arr)=>arr[Math.floor(Math.random()*arr.length)];
 const clamp=(n,lo,hi)=>Math.max(lo,Math.min(hi,n));
 
-// ========= Raccourcis =========
+/* ==================== Raccourcis DOM ==================== */
 const q = (id)=>document.getElementById(id);
 const stageShell = q('stage-shell');
 const stage = q('stage');
@@ -300,7 +301,7 @@ const btnStopHeader=q('btn-stop-header');
 
 q('year').textContent = new Date().getFullYear();
 
-// ========= Persistence =========
+/* ==================== Persistence ==================== */
 function saveSettings(){
   const payload = {
     mode: state.mode, repType: state.repType,
@@ -333,8 +334,12 @@ function loadSettings(){
   }catch(e){}
 }
 
-// ========= Modes =========
-const MODES = [ ['stroop','Stroop'], ['chiffres','Chiffres'], ['couleur','Couleur'], ['directions','Directions'], ['chiffreCouleur','Chiffre + Couleur'], ['directionCouleur','Direction + Couleur'], ['multi','Multi'] ];
+/* ==================== Modes ==================== */
+const MODES = [
+  ['stroop','Stroop'], ['chiffres','Chiffres'], ['couleur','Couleur'],
+  ['directions','Directions'], ['chiffreCouleur','Chiffre + Couleur'],
+  ['directionCouleur','Direction + Couleur'], ['multi','Multi']
+];
 const modeChips = q('mode-chips');
 MODES.forEach(([key,label])=>{
   const b=document.createElement('button'); b.className='chip'+(state.mode===key?' active':''); b.textContent=label; b.dataset.mode=key;
@@ -343,7 +348,7 @@ MODES.forEach(([key,label])=>{
 });
 function refreshModeChips(){ Array.from(modeChips.children).forEach(ch=> ch.classList.toggle('active', ch.dataset.mode===state.mode)); }
 
-// ========= Sélections =========
+/* ==================== Sélections ==================== */
 const swColors = q('swatches-colors');
 const swBgs = q('swatches-bgs');
 function makeSwatch(container, list, selectedArr){
@@ -374,10 +379,16 @@ DIRECTIONS.forEach(d=>{ const b=document.createElement('button'); b.className='c
 
 const chipsMulti = q('chips-multi');
 const multiMap = { stroop:'Stroop', chiffres:'Chiffres', couleur:'Couleur', directions:'Directions', chiffreCouleur:'Chiffre + Couleur', directionCouleur:'Direction + Couleur' };
-Object.entries(multiMap).forEach(([k,label])=>{ const b=document.createElement('button'); b.className='chip'; if(state.multiPool[k]) b.classList.add('active'); b.textContent=label; b.dataset.k=k; b.addEventListener('click', ()=>{ state.multiPool[k]=!state.multiPool[k]; b.classList.toggle('active', !!state.multiPool[k]); saveSettings(); }); chipsMulti.appendChild(b); });
+Object.entries(multiMap).forEach(([k,label])=>{
+  const b=document.createElement('button'); b.className='chip'; if(state.multiPool[k]) b.classList.add('active'); b.textContent=label; b.dataset.k=k;
+  b.addEventListener('click', ()=>{ state.multiPool[k]=!state.multiPool[k]; b.classList.toggle('active', !!state.multiPool[k]); saveSettings(); });
+  chipsMulti.appendChild(b);
+});
 
-// ========= Inputs =========
-const inpAppear=q('inp-appear'), inpInterval=q('inp-interval'), inpSets=q('inp-sets'), inpReps=q('inp-reps'), inpSetDur=q('inp-setdur'), inpRest=q('inp-rest'), inpSize=q('inp-size'), chkRand=q('chk-rand'), chkBeep=q('chk-beep'), chkAutoFS=q('chk-autofs');
+/* ==================== Inputs ==================== */
+const inpAppear=q('inp-appear'), inpInterval=q('inp-interval'), inpSets=q('inp-sets'), inpReps=q('inp-reps'),
+      inpSetDur=q('inp-setdur'), inpRest=q('inp-rest'), inpSize=q('inp-size'),
+      chkRand=q('chk-rand'), chkBeep=q('chk-beep'), chkAutoFS=q('chk-autofs');
 
 inpAppear.addEventListener('input', ()=> { state.appearanceMs = clamp(Number(inpAppear.value)||500, 50, 5000); saveSettings(); });
 inpInterval.addEventListener('input', ()=> { state.intervalMs = clamp(Number(inpInterval.value)||0, 0, 5000); saveSettings(); });
@@ -416,15 +427,20 @@ function updateVisibility(){
 }
 updateVisibility(); updateRepTypeUI();
 
-// ========= Beep =========
+/* ==================== Beep ==================== */
 let audioCtx=null; function ensureCtx(){ if(!audioCtx){ const C=window.AudioContext||window.webkitAudioContext; if(C) audioCtx=new C(); } return audioCtx; }
-function beep(d=150,f=880,v=.22){ try{ const c=ensureCtx(); if(!c) return; const o=c.createOscillator(); const g=c.createGain(); o.type='sine'; o.frequency.value=f; g.gain.value=v; o.connect(g); g.connect(c.destination); o.start(); setTimeout(()=>{ try{o.stop()}catch(e){} }, d); }catch(e){} }
+function beep(d=150,f=880,v=.22){
+  try{ const c=ensureCtx(); if(!c) return; const o=c.createOscillator(); const g=c.createGain();
+    o.type='sine'; o.frequency.value=f; g.gain.value=v; o.connect(g); g.connect(c.destination);
+    o.start(); setTimeout(()=>{ try{o.stop()}catch(e){} }, d);
+  }catch(e){}
+}
 
-// ========= Stimulus (anti-dépassement + position sûre) =========
+/* ==================== Stimulus (anti-dépassement + position sûre) ==================== */
 function clearStimulus(){ Array.from(stage.querySelectorAll('.bg-layer,.stimulus')).forEach(n=>n.remove()); }
 
 function measureAndPlace(node){
-  // Mesure à scale(1) centré
+  // Placer centré à scale(1) puis mesurer
   node.style.transform='translate(-50%, -50%) scale(1)';
   node.style.top='50%'; node.style.left='50%';
 
@@ -435,6 +451,7 @@ function measureAndPlace(node){
   const availH=Math.max(1,rectStage.height - MARGIN*2);
   let sc=Math.min(availW/box.width, availH/box.height);
   if(!Number.isFinite(sc)||sc<=0) sc=1; sc=Math.min(sc,1);
+
   // Position aléatoire sûre si demandé
   if(state.randomPos){
     const w=box.width*sc, h=box.height*sc;
@@ -449,28 +466,50 @@ function measureAndPlace(node){
 
 function showStimulus(){
   clearStimulus();
-  const mode= state.mode==='multi' ? (function(){ const allowed=Object.entries(state.multiPool).filter(([,v])=>v).map(([k])=>k); const fallback=['stroop','chiffres','couleur','directions','chiffreCouleur','directionCouleur']; return randFrom(allowed.length?allowed:fallback); })() : state.mode;
+  const mode = (state.mode==='multi')
+    ? (()=>{
+        const allowed=Object.entries(state.multiPool).filter(([,v])=>v).map(([k])=>k);
+        const fallback=['stroop','chiffres','couleur','directions','chiffreCouleur','directionCouleur'];
+        return randFrom(allowed.length?allowed:fallback);
+      })()
+    : state.mode;
+
+  // helpers de tirage
+  const pickColor = ()=> { const arr = COLORS.filter(c=>state.selectedColors.includes(c.name)); return randFrom(arr.length?arr:COLORS); };
+  const pickBg    = ()=> { const arr = COLORS.filter(c=>state.selectedBgColors.includes(c.name)); return randFrom(arr.length?arr:COLORS); };
+  const pickNum   = ()=> { const arr = state.selectedNumbers.length?state.selectedNumbers:NUMBERS; return randFrom(arr); };
+  const pickDir   = ()=> { const arr = DIRECTIONS.filter(d=>state.selectedDirections.includes(d.key)); return randFrom(arr.length?arr:DIRECTIONS); };
+
   let node=null;
-  const pickColor()=> randFrom(COLORS.filter(c=>state.selectedColors.includes(c.name)) || COLORS);
-  const pickBg   ()=> randFrom(COLORS.filter(c=>state.selectedBgColors.includes(c.name)) || COLORS);
-  const pickNum  ()=> randFrom(state.selectedNumbers.length?state.selectedNumbers:NUMBERS);
-  const pickDir  ()=> randFrom(DIRECTIONS.filter(d=>state.selectedDirections.includes(d.key)) || DIRECTIONS);
 
   if(mode==='stroop'){
-    const word=pickColor(); const ink=pickColor(); node=document.createElement('div'); node.textContent=word.name; node.style.color=ink.hex;
+    const word=pickColor(); const ink=pickColor();
+    node=document.createElement('div'); node.textContent=word.name; node.style.color=ink.hex;
   } else if(mode==='chiffres'){
-    const n=pickNum(); const ink=pickColor(); node=document.createElement('div'); node.textContent=String(n); node.style.color=ink.hex;
+    const n=pickNum(); const ink=pickColor();
+    node=document.createElement('div'); node.textContent=String(n); node.style.color=ink.hex;
   } else if(mode==='couleur'){
-    const c=pickColor(); const bgEl=document.createElement('div'); bgEl.className='bg-layer'; bgEl.style.background=c.hex; stage.appendChild(bgEl); node=null;
+    const c=pickColor();
+    const bgEl=document.createElement('div'); bgEl.className='bg-layer'; bgEl.style.background=c.hex; stage.appendChild(bgEl);
   } else if(mode==='directions'){
-    const d=pickDir(); node=document.createElement('div'); node.textContent=d.label; node.style.color='#111';
+    const d=pickDir();
+    node=document.createElement('div'); node.textContent=d.label; node.style.color='#111';
   } else if(mode==='chiffreCouleur'){
-    const n=pickNum(); const ink=pickColor(); const b=pickBg(); const bgEl=document.createElement('div'); bgEl.className='bg-layer'; bgEl.style.background=b.hex; stage.appendChild(bgEl); node=document.createElement('div'); node.textContent=String(n); node.style.color=ink.hex;
+    const n=pickNum(); const ink=pickColor(); const b=pickBg();
+    const bgEl=document.createElement('div'); bgEl.className='bg-layer'; bgEl.style.background=b.hex; stage.appendChild(bgEl);
+    node=document.createElement('div'); node.textContent=String(n); node.style.color=ink.hex;
   } else if(mode==='directionCouleur'){
-    const d=pickDir(); const ink=pickColor(); const b=pickBg(); const bgEl=document.createElement('div'); bgEl.className='bg-layer'; bgEl.style.background=b.hex; stage.appendChild(bgEl); node=document.createElement('div'); node.textContent=d.label; node.style.color=ink.hex;
+    const d=pickDir(); const ink=pickColor(); const b=pickBg();
+    const bgEl=document.createElement('div'); bgEl.className='bg-layer'; bgEl.style.background=b.hex; stage.appendChild(bgEl);
+    node=document.createElement('div'); node.textContent=d.label; node.style.color=ink.hex;
   }
 
-  if(node){ node.className='stimulus'; node.style.fontSize = state.sizeVH + 'vh'; stage.appendChild(node); measureAndPlace(node); }
+  if(node){
+    node.className='stimulus';
+    node.style.fontSize = state.sizeVH + 'vh';
+    stage.appendChild(node);
+    measureAndPlace(node);
+  }
 }
 
 function relayoutIfVisible(){
@@ -480,54 +519,107 @@ function relayoutIfVisible(){
 window.addEventListener('resize', ()=>{ relayoutIfVisible(); });
 window.addEventListener('orientationchange', ()=>{ setTimeout(relayoutIfVisible, 120); });
 
-// ========= Progress =========
+/* ==================== Progress ==================== */
 function updateProgress(){
   const setPct = (state.currentSet / Math.max(1, state.sets)) * 100; barSet.style.width = Math.round(setPct) + '%'; txtSet.textContent = state.currentSet + '/' + state.sets;
-  if(state.repType==='apparitions'){ const repPct = (state.reps? (state.currentRep/state.reps) : 0) * 100; barRep.style.width = Math.round(repPct) + '%'; txtRep.textContent = state.currentRep + '/' + state.reps; }
-  else { const pct = clamp(state.runningSetElapsedMs / Math.max(1, state.setDurationSec*1000), 0, 1) * 100; barRep.style.width = Math.round(pct) + '%'; txtRep.textContent = Math.floor(state.runningSetElapsedMs/1000) + 's / ' + state.setDurationSec + 's'; }
+  if(state.repType==='apparitions'){
+    const repPct = (state.reps? (state.currentRep/state.reps) : 0) * 100; barRep.style.width = Math.round(repPct) + '%'; txtRep.textContent = state.currentRep + '/' + state.reps;
+  } else {
+    const pct = clamp(state.runningSetElapsedMs / Math.max(1, state.setDurationSec*1000), 0, 1) * 100;
+    barRep.style.width = Math.round(pct) + '%';
+    txtRep.textContent = Math.floor(state.runningSetElapsedMs/1000) + 's / ' + state.setDurationSec + 's';
+  }
 }
 
-// ========= Session =========
+/* ==================== Session ==================== */
 let rafId=0; let elapsedStart=0;
-function setRunningUI(on){ btnStart.style.display = on ? 'none' : ''; btnStop.style.display = on ? '' : 'none'; btnStopHeader.style.display = on ? '' : 'none'; }
+function setRunningUI(on){
+  btnStart.style.display = on ? 'none' : '';
+  btnStop.style.display = on ? '' : 'none';
+  btnStopHeader.style.display = on ? '' : 'none';
+}
 
 function stopSession(){
-  state.cancelled=true; state.phase='idle'; state.currentSet=0; state.currentRep=0; state.visible=false; state.runningSetElapsedMs=0; clearStimulus(); updateProgress();
-  cancelAnimationFrame(rafId); setRunningUI(false); ovCount.style.display='none'; ovRest.style.display='none';
+  state.cancelled=true;
+  state.phase='idle';
+  state.currentSet=0; state.currentRep=0; state.runningSetElapsedMs=0;
+  clearStimulus(); updateProgress();
+  cancelAnimationFrame(rafId);
+  setRunningUI(false);
+  ovCount.style.display='none'; ovRest.style.display='none';
 }
 
-function tickElapsed(){ state.runningSetElapsedMs = performance.now() - elapsedStart; updateProgress(); if(!state.cancelled && state.phase==='running') rafId = requestAnimationFrame(tickElapsed); }
+function tickElapsed(){
+  state.runningSetElapsedMs = performance.now() - elapsedStart; updateProgress();
+  if(!state.cancelled && state.phase==='running') rafId = requestAnimationFrame(tickElapsed);
+}
 
 async function runSet(index){
-  state.currentSet=index+1; state.currentRep=0; state.runningSetElapsedMs=0; updateProgress(); elapsedStart=performance.now(); cancelAnimationFrame(rafId); rafId=requestAnimationFrame(tickElapsed);
+  state.currentSet=index+1; state.currentRep=0; state.runningSetElapsedMs=0; updateProgress();
+  elapsedStart=performance.now(); cancelAnimationFrame(rafId); rafId=requestAnimationFrame(tickElapsed);
+
   if(state.repType==='apparitions'){
     for(let i=0;i<state.reps;i++){
-      if(state.cancelled) return; state.currentRep=i+1; updateProgress(); showStimulus(); if(state.beep) beep(); await new Promise(r=>setTimeout(r,state.appearanceMs)); if(state.cancelled) return; clearStimulus(); await new Promise(r=>setTimeout(r,state.intervalMs)); if(state.cancelled) return;
+      if(state.cancelled) return;
+      state.currentRep=i+1; updateProgress();
+      showStimulus(); if(state.beep) beep();
+      await new Promise(r=>setTimeout(r,state.appearanceMs)); if(state.cancelled) return;
+      clearStimulus();
+      await new Promise(r=>setTimeout(r,state.intervalMs)); if(state.cancelled) return;
     }
   } else {
     const hard=state.setDurationSec*1000; let count=0;
-    while(!state.cancelled && (performance.now()-elapsedStart)<hard){ state.currentRep=++count; updateProgress(); showStimulus(); if(state.beep) beep(); await new Promise(r=>setTimeout(r,state.appearanceMs)); if(state.cancelled) return; clearStimulus(); const remaining = hard - (performance.now()-elapsedStart); if(remaining<=0) break; await new Promise(r=>setTimeout(r, Math.min(state.intervalMs, remaining))); }
+    while(!state.cancelled && (performance.now()-elapsedStart)<hard){
+      state.currentRep=++count; updateProgress();
+      showStimulus(); if(state.beep) beep();
+      await new Promise(r=>setTimeout(r,state.appearanceMs)); if(state.cancelled) return;
+      clearStimulus();
+      const remaining = hard - (performance.now()-elapsedStart);
+      if(remaining<=0) break;
+      await new Promise(r=>setTimeout(r, Math.min(state.intervalMs, remaining)));
+    }
   }
 }
 
 async function startSession(){
   setRunningUI(true);
   state.cancelled=false;
-  // Plein écran au démarrage (sur la zone shell)
-  if(state.autoFullscreen && !document.fullscreenElement && stageShell.requestFullscreen){ try{ await stageShell.requestFullscreen({ navigationUI: 'hide' }); }catch(e){} }
 
-  state.phase='countdown'; for(let c=3;c>0;c--){ if(state.cancelled) return stopSession(); ovCount.style.display='grid'; countNum.textContent=String(c); await new Promise(r=>setTimeout(r,1000)); }
+  // Plein écran au démarrage (sur la zone stimuli)
+  if(state.autoFullscreen && !document.fullscreenElement && stageShell.requestFullscreen){
+    try{ await stageShell.requestFullscreen({ navigationUI: 'hide' }); }catch(e){}
+  }
+
+  state.phase='countdown';
+  for(let c=3;c>0;c--){
+    if(state.cancelled) return stopSession();
+    ovCount.style.display='grid';
+    countNum.textContent=String(c);
+    await new Promise(r=>setTimeout(r,1000));
+  }
   ovCount.style.display='none';
 
   for(let s=0;s<state.sets;s++){
-    if(state.cancelled) return stopSession(); state.phase='running'; await runSet(s);
     if(state.cancelled) return stopSession();
-    if(s<state.sets-1){ state.phase='rest'; for(let t=state.restSec;t>0;t--){ if(state.cancelled) return stopSession(); ovRest.style.display='grid'; restNum.textContent=String(t); await new Promise(r=>setTimeout(r,1000)); } ovRest.style.display='none'; if(state.beep) beep(250,660,0.25); }
+    state.phase='running';
+    await runSet(s);
+    if(state.cancelled) return stopSession();
+    if(s<state.sets-1){
+      state.phase='rest';
+      for(let t=state.restSec;t>0;t--){
+        if(state.cancelled) return stopSession();
+        ovRest.style.display='grid'; restNum.textContent=String(t);
+        await new Promise(r=>setTimeout(r,1000));
+      }
+      ovRest.style.display='none';
+      if(state.beep) beep(250,660,0.25);
+    }
   }
-  state.phase='finished'; setRunningUI(false);
+  state.phase='finished';
+  setRunningUI(false);
 }
 
-// ========= Boutons =========
+/* ==================== Boutons & Raccourcis ==================== */
 btnStart.addEventListener('click', startSession);
 btnStop.addEventListener('click', stopSession);
 btnStopHeader.addEventListener('click', stopSession);
@@ -536,25 +628,22 @@ q('btn-exit-fs').addEventListener('click', ()=>{ if(document.fullscreenElement) 
 
 document.addEventListener('fullscreenchange', ()=>{ q('btn-exit-fs').style.display = document.fullscreenElement ? '' : 'none'; });
 
-// Clavier
 window.addEventListener('keydown', (e)=>{
   if(e.code==='Space'){ e.preventDefault(); (state.phase==='idle'||state.phase==='finished')? startSession() : stopSession(); }
   if(e.key && e.key.toLowerCase()==='f'){ if(document.fullscreenElement) document.exitFullscreen(); else stageShell.requestFullscreen?.({navigationUI:'hide'}); }
 });
 
-// ========= UI init =========
-function setMode(m){ state.mode=m; saveSettings(); updateVisibility(); refreshModeChips(); }
-function refreshModeChips(){ Array.from(modeChips.children).forEach(ch=> ch.classList.toggle('active', ch.dataset.mode===state.mode)); }
-
+/* ==================== Init ==================== */
 function setMobileVh(){ document.documentElement.style.setProperty('--app-vh', window.innerHeight*0.01 + 'px'); }
-window.addEventListener('resize', setMobileVh); window.addEventListener('orientationchange', ()=> setTimeout(setMobileVh, 150)); setMobileVh();
+window.addEventListener('resize', setMobileVh); window.addEventListener('orientationchange', ()=> setTimeout(setMobileVh, 150));
+setMobileVh();
 
-// Charger éventuellement les réglages précédents
+function updateProgressBarsInit(){ state.currentSet=0; state.currentRep=0; state.runningSetElapsedMs=0; updateProgress(); }
+function afterLoadSwatches(){ makeSwatch(swColors, COLORS, state.selectedColors); makeSwatch(swBgs, COLORS, state.selectedBgColors); }
+
 loadSettings();
-// Mettre à jour les swatches après load (au cas où)
-makeSwatch(swColors, COLORS, state.selectedColors);
-makeSwatch(swBgs, COLORS, state.selectedBgColors);
-updateProgress();
+afterLoadSwatches();
+updateProgressBarsInit();
 </script>
 </body>
 </html>
